@@ -8,15 +8,14 @@ mod monitoring;
 mod system_monitor;
 mod types;
 mod errors;
+mod xml_parser;
 
-use tauri::Manager;
 use tracing::{info, error};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use vm_manager::VmManager;
 use types::*;
-use errors::KvmError;
 
 type AppState = Arc<RwLock<VmManager>>;
 
@@ -122,6 +121,105 @@ async fn create_proxmox_vm(
     manager.create_proxmox_vm(name, proxmox_path, memory_gb, vcpus).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn import_vm_from_xml(
+    state: tauri::State<'_, AppState>,
+    xml_path: String,
+) -> Result<String, String> {
+    let mut manager = state.write().await;
+    manager.import_vm_from_xml(&xml_path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_vm_from_qcow2(
+    state: tauri::State<'_, AppState>,
+    qcow2_path: String,
+    vm_name: String,
+    memory_mb: u64,
+    vcpus: u32,
+    passthrough_device: Option<String>,
+) -> Result<String, String> {
+    let mut manager = state.write().await;
+    manager.create_vm_from_qcow2(&qcow2_path, &vm_name, memory_mb, vcpus, passthrough_device.as_deref()).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn refresh_vms(state: tauri::State<'_, AppState>) -> Result<Vec<VirtualMachine>, String> {
+    let mut manager = state.write().await;
+    manager.refresh_vm_list().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_qcow2_info(path: String) -> Result<QcowInfo, String> {
+    use std::process::Command;
+    
+    info!("Getting QCOW2 info for: {}", path);
+    
+    // Check if file exists
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    
+    // Use qemu-img info to get details
+    let output = Command::new("qemu-img")
+        .args(["info", "--output=json", &path])
+        .output()
+        .map_err(|e| format!("Failed to run qemu-img: {}", e))?;
+    
+    if !output.status.success() {
+        return Err(format!("qemu-img failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    let info_json: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("Failed to parse qemu-img output: {}", e))?;
+    
+    let filename = std::path::Path::new(&path)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    
+    let size_gb = info_json["actual-size"]
+        .as_u64()
+        .unwrap_or(0) as f64 / 1024.0 / 1024.0 / 1024.0;
+    
+    let virtual_size_gb = info_json["virtual-size"]
+        .as_u64()
+        .unwrap_or(0) as f64 / 1024.0 / 1024.0 / 1024.0;
+    
+    let format = info_json["format"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    
+    let cluster_size = info_json["cluster-size"].as_u64();
+    
+    let backing_file = info_json["backing-filename"]
+        .as_str()
+        .map(|s| s.to_string());
+    
+    Ok(QcowInfo {
+        path: path.clone(),
+        filename,
+        size_gb,
+        format,
+        virtual_size_gb,
+        cluster_size,
+        backing_file,
+    })
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct QcowInfo {
+    pub path: String,
+    pub filename: String,
+    pub size_gb: f64,
+    pub format: String,
+    pub virtual_size_gb: f64,
+    pub cluster_size: Option<u64>,
+    pub backing_file: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
     // Initialize tracing
@@ -156,6 +254,10 @@ async fn main() {
             get_storage_pools,
             get_networks,
             create_proxmox_vm,
+            import_vm_from_xml,
+            create_vm_from_qcow2,
+            refresh_vms,
+            get_qcow2_info,
             system_monitor::get_system_statistics,
             system_monitor::get_proxmox_info,
             system_monitor::get_system_history,

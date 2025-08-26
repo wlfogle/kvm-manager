@@ -109,7 +109,7 @@ impl SystemMonitor {
     pub fn get_system_stats(&mut self) -> SystemStats {
         self.system.refresh_all();
 
-        let cpu_usage = self.system.global_cpu_info().cpu_usage();
+        let cpu_usage = self.system.global_cpu_usage();
         let memory_used = self.system.used_memory();
         let memory_total = self.system.total_memory();
         let memory_percentage = if memory_total > 0 {
@@ -177,7 +177,7 @@ impl SystemMonitor {
         self.system.processes()
             .iter()
             .filter(|(_, process)| {
-                let name = process.name();
+                let name = process.name().to_string_lossy();
                 name.contains("qemu") || name.contains("kvm") || name.contains("virt")
             })
             .count() as u32

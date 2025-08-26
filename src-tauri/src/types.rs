@@ -121,21 +121,38 @@ pub struct Snapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInterface {
-    pub mac_address: String,
-    pub network_name: String,
-    pub interface_type: String,
+    pub type_: String,
+    pub mac_address: Option<String>,
+    pub source: String,
     pub model: String,
-    pub link_state: String,
+    pub connected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageDevice {
     pub device: String,       // vda, vdb, etc.
-    pub source: String,       // file path or device
-    pub format: String,       // qcow2, raw, etc.
-    pub size: u64,           // Size in bytes
+    pub type_: String,        // qcow2, raw, etc.
+    pub size_gb: f64,         // Size in GB
+    pub path: Option<String>, // file path or device
     pub bus: String,         // virtio, sata, etc.
-    pub cache: String,       // cache mode
+    pub cache: Option<String>, // cache mode
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeInfo {
+    pub name: String,
+    pub path: String,
+    pub format: String,
+    pub capacity: u64,
+    pub allocation: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeConfig {
+    pub name: String,
+    pub format: String,
+    pub capacity: u64,
+    pub allocation: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

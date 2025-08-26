@@ -30,17 +30,14 @@ import {
   Computer,
   Timeline,
   Visibility,
+  CloudUpload,
 } from '@mui/icons-material';
-// import { invoke } from '@tauri-apps/api/tauri';
-const invoke = async (command: string, args?: any): Promise<any> => {
-  console.log('Tauri invoke:', command, args);
-  // Placeholder for Tauri invoke function
-  return Promise.reject(new Error('Tauri invoke not available'));
-};
+import { invoke } from '@tauri-apps/api/tauri';
 import { useCustomTheme } from '../contexts/ThemeContext';
 import { useAsyncOperation } from '../contexts/NotificationContext';
 import { format } from 'date-fns';
 import VMDetailsModal from './VMDetailsModal';
+import ImportVmDialog from './ImportVmDialog';
 
 interface VM {
   id: string;
@@ -93,6 +90,7 @@ const VirtualMachinesDashboard: React.FC = () => {
   const [vmStats, setVmStats] = useState<Record<string, VMStats>>({});
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const { theme, isDarkMode } = useCustomTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { executeAsync } = useAsyncOperation();
@@ -516,6 +514,13 @@ const VirtualMachinesDashboard: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      
+      {/* Import VM Dialog */}
+      <ImportVmDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onVmCreated={loadVms}
+      />
     );
   };
 
@@ -533,13 +538,23 @@ const VirtualMachinesDashboard: React.FC = () => {
             </IconButton>
           </Tooltip>
           {!isMobile && (
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={() => setCreateDialogOpen(true)}
-            >
-              Create VM
-            </Button>
+            <>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => setCreateDialogOpen(true)}
+              >
+                Create Proxmox VM
+              </Button>
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<CloudUpload />}
+                onClick={() => setImportDialogOpen(true)}
+              >
+                Import/Create VM
+              </Button>
+            </>
           )}
         </Box>
       </Box>
@@ -572,9 +587,9 @@ const VirtualMachinesDashboard: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<Add />}
-            onClick={() => setCreateDialogOpen(true)}
+            onClick={() => setImportDialogOpen(true)}
           >
-            Create VM
+            Create/Import VM
           </Button>
         </Box>
       )}
@@ -585,7 +600,7 @@ const VirtualMachinesDashboard: React.FC = () => {
           color="primary"
           aria-label="add"
           sx={{ position: 'fixed', bottom: 16, right: 16 }}
-          onClick={() => setCreateDialogOpen(true)}
+          onClick={() => setImportDialogOpen(true)}
         >
           <Add />
         </Fab>
