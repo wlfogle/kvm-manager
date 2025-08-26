@@ -1,9 +1,7 @@
-import React from 'react';
-
 interface MetricCardProps {
   title: string;
   value: string | number;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   color: 'blue' | 'green' | 'purple' | 'yellow' | 'red';
   subtitle?: string;
 }

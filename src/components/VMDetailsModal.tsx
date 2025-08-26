@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -19,10 +19,7 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
-  Divider,
   TextField,
-  Switch,
-  FormControlLabel,
   Tooltip,
   Avatar,
 } from '@mui/material';
@@ -31,21 +28,19 @@ import {
   Computer,
   Memory,
   Storage,
-  NetworkCheck,
   PlayArrow,
   Stop,
   Pause,
   RestartAlt,
-  Settings,
-  Timeline,
-  Speed,
   Save,
   Edit,
   Visibility,
   Screenshot,
   Terminal,
+  Speed,
+  Settings,
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
 // import { invoke } from '@tauri-apps/api/tauri';
 const invoke = async (command: string, args?: any): Promise<any> => {
@@ -116,6 +111,7 @@ const VMDetailsModal: React.FC<VMDetailsModalProps> = ({ vm, open, onClose, onVm
       const interval = setInterval(loadVmStats, 5000);
       return () => clearInterval(interval);
     }
+    return; // Explicit return for when condition is false
   }, [vm, open]);
 
   const loadVmStats = async () => {

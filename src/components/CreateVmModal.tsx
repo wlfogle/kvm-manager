@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -27,7 +27,7 @@ export default function CreateVmModal({ onClose, onSuccess }: CreateVmModalProps
   const [step, setStep] = useState(1);
   const [storagePools, setStoragePools] = useState<StoragePool[]>([]);
   const [networks, setNetworks] = useState<Network[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const {
@@ -35,7 +35,6 @@ export default function CreateVmModal({ onClose, onSuccess }: CreateVmModalProps
     handleSubmit,
     formState: { errors },
     watch,
-    setValue,
   } = useForm<VmConfig>({
     resolver: zodResolver(vmConfigSchema),
     defaultValues: {

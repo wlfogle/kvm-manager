@@ -83,6 +83,17 @@ export interface VmStats {
   guest_agent_connected: boolean;
 }
 
+export interface SystemStats {
+  cpu_usage: number;        // Percentage
+  memory_used: number;      // Used system memory in MB
+  memory_total: number;     // Total system memory in MB
+  disk_usage: number;       // Used disk space percentage
+  network_rx: number;       // System network bytes received per second
+  network_tx: number;       // System network bytes transmitted per second
+  load_average: [number, number, number]; // 1m, 5m, 15m load averages
+  uptime: number;           // System uptime in seconds
+}
+
 export interface HostInfo {
   hostname: string;
   hypervisor: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useCallback, memo } from 'react';
 import {
   PlayIcon,
   StopIcon,
@@ -20,7 +20,7 @@ interface VmCardProps {
   onDelete: () => void;
 }
 
-export default function VmCard({ vm, onStart, onStop, onDelete }: VmCardProps) {
+const VmCard = memo(function VmCard({ vm, onStart, onStop, onDelete }: VmCardProps) {
   const [loading, setLoading] = useState(false);
 
   const getStateColor = (state: VmState) => {
@@ -53,14 +53,14 @@ export default function VmCard({ vm, onStart, onStop, onDelete }: VmCardProps) {
     }
   };
 
-  const handleAction = async (action: () => void) => {
+  const handleAction = useCallback(async (action: () => void) => {
     setLoading(true);
     try {
       await action();
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow">
@@ -162,4 +162,6 @@ export default function VmCard({ vm, onStart, onStop, onDelete }: VmCardProps) {
       </div>
     </div>
   );
-}
+});
+
+export default VmCard;

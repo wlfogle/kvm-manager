@@ -1,13 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ComputerDesktopIcon,
   CircleStackIcon,
   GlobeAltIcon,
   ChartBarIcon,
-  PlayIcon,
-  StopIcon,
-  PauseIcon,
 } from '@heroicons/react/24/outline';
 
 import { HostInfo, VirtualMachine, DashboardMetrics } from '../types';

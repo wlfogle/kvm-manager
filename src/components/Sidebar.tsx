@@ -1,4 +1,3 @@
-import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   HomeIcon,
@@ -6,7 +5,6 @@ import {
   CircleStackIcon,
   GlobeAltIcon,
   CogIcon,
-  ChartBarIcon,
 } from '@heroicons/react/24/outline';
 
 const navigation = [

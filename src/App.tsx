@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import {
   Box,
@@ -33,11 +33,15 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { CustomThemeProvider, useCustomTheme } from './contexts/ThemeContext';
 import { AppProviders } from './contexts/NotificationContext';
-import VirtualMachinesDashboard from './components/VirtualMachinesDashboard';
-import Dashboard from './pages/Dashboard';
-import Storage from './pages/Storage';
-import Networks from './pages/Networks';
-import Settings from './pages/Settings';
+import LoadingSpinner from './components/LoadingSpinner';
+import ErrorBoundary from './components/ErrorBoundary';
+
+// Lazy load components for better performance
+const VirtualMachinesDashboard = lazy(() => import('./components/VirtualMachinesDashboard'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Storage = lazy(() => import('./pages/Storage'));
+const Networks = lazy(() => import('./pages/Networks'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 const DRAWER_WIDTH = 280;
 
@@ -210,13 +214,17 @@ function AppContent() {
         }}
       >
         <Toolbar /> {/* Spacer for AppBar */}
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/virtual-machines" element={<VirtualMachinesDashboard />} />
-          <Route path="/storage" element={<Storage />} />
-          <Route path="/networks" element={<Networks />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
+        <ErrorBoundary>
+          <Suspense fallback={<LoadingSpinner />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/virtual-machines" element={<VirtualMachinesDashboard />} />
+              <Route path="/storage" element={<Storage />} />
+              <Route path="/networks" element={<Networks />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </Box>
     </Box>
   );

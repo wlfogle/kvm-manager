@@ -8,7 +8,7 @@ import {
   LinearProgress,
   IconButton,
 } from '@mui/material';
-import { Close as CloseIcon, CheckCircle, Error as ErrorIcon, Warning, Info } from '@mui/icons-material';
+import { Close as CloseIcon } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 
 // Styled components for better loading UI
@@ -148,7 +148,7 @@ const NotificationProvider: React.FC<ProviderProps> = ({ children }) => {
 
     enqueueSnackbar(message, {
       variant,
-      persist: options.persist,
+      persist: options.persist ?? false,
       action,
       anchorOrigin: {
         vertical: 'bottom',

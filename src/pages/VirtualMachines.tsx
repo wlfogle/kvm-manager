@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { PlusIcon, ComputerDesktopIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';

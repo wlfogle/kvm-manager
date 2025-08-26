@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Grid,
   Card,
@@ -10,7 +10,6 @@ import {
   Box,
   LinearProgress,
   Tooltip,
-  Badge,
   Fab,
   Dialog,
   DialogTitle,
@@ -18,31 +17,20 @@ import {
   DialogActions,
   useMediaQuery,
   Avatar,
-  Divider,
-  Stack,
 } from '@mui/material';
 import {
   PlayArrow,
   Stop,
   Pause,
-  Delete,
   Settings,
   Memory,
   Storage,
-  NetworkCheck,
   Add,
   Refresh,
   Computer,
-  Speed,
   Timeline,
   Visibility,
-  VpnKey,
-  CameraAlt,
-  PowerSettingsNew,
-  Edit,
-  MoreVert,
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts';
 // import { invoke } from '@tauri-apps/api/tauri';
 const invoke = async (command: string, args?: any): Promise<any> => {
   console.log('Tauri invoke:', command, args);
@@ -223,7 +211,7 @@ const VirtualMachinesDashboard: React.FC = () => {
     }
   };
 
-  const getOSIcon = (osType: string) => {
+  const getOSIcon = (_osType: string) => {
     return <Computer />;
   };
 
@@ -500,9 +488,9 @@ const VirtualMachinesDashboard: React.FC = () => {
   };
 
   const CreateVMDialog: React.FC = () => {
-    const [vmName, setVmName] = useState('');
-    const [memory, setMemory] = useState(4);
-    const [vcpus, setVcpus] = useState(2);
+    const [vmName] = useState('');
+    const [memory] = useState(4);
+    const [vcpus] = useState(2);
 
     return (
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
