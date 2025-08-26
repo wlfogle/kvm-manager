@@ -34,19 +34,11 @@
   "storage_devices": [
     {
       "device": "vda",
-      "source": "/run/media/lou/Data/proxmox-ve.qcow2",
+      "source": "/var/lib/libvirt/images/test-proxmox-ve.qcow2",
       "format": "qcow2",
       "size": 0,
       "bus": "virtio",
       "cache": "writeback"
-    },
-    {
-      "device": "vdb",
-      "source": "/dev/nvme1n1p2",
-      "format": "raw",
-      "size": 0,
-      "bus": "virtio",
-      "cache": "none"
     }
   ],
   "network_interfaces": [

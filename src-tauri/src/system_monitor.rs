@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, Disk, Networks, Cpu};
+use sysinfo::System;
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use tokio::time::{interval, Duration};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use tracing::{info, error};
 
 // Global system info cache
 static SYSTEM_CACHE: Lazy<DashMap<String, SystemStats>> = Lazy::new(|| DashMap::new());
@@ -123,14 +124,8 @@ impl SystemMonitor {
 
         let disk_stats = vec![]; // Simplified for now - sysinfo API changes
 
-        let network_stats = NetworkInfo {
-            total_bytes_received: 0,
-            total_bytes_transmitted: 0,
-            total_packets_received: 0,
-            total_packets_transmitted: 0,
-            interfaces: vec![],
-        };
-        let load_average = LoadAverage { one: 0.0, five: 0.0, fifteen: 0.0 };
+        let network_stats = self.get_network_stats();
+        let load_average = self.get_load_average();
         let uptime = System::uptime();
         let running_vms = self.count_running_vms();
 
@@ -184,17 +179,65 @@ impl SystemMonitor {
     }
 
     pub fn get_proxmox_vm_info(vm_path: &str) -> Result<ProxmoxVMInfo, String> {
-        use std::fs;
+        use std::process::Command;
+        use std::path::Path;
         
-        let metadata = fs::metadata(vm_path)
-            .map_err(|e| format!("Failed to get VM file info: {}", e))?;
+        info!("Checking Proxmox VM info for path: {}", vm_path);
         
-        let size_bytes = metadata.len();
+        // First check if the path exists
+        if !Path::new(vm_path).exists() {
+            error!("VM file does not exist: {}", vm_path);
+            return Err(format!("VM file does not exist: {}", vm_path));
+        }
+        
+        // Use stat command to get file info (works better with different permissions)
+        let stat_output = Command::new("stat")
+            .args(["-c", "%s", vm_path])
+            .output();
+            
+        let size_bytes = match stat_output {
+            Ok(output) if output.status.success() => {
+                let size_str = String::from_utf8_lossy(&output.stdout);
+                size_str.trim().parse::<u64>().unwrap_or(0)
+            },
+            _ => {
+                // Fallback to ls -l if stat fails
+                let ls_output = Command::new("ls")
+                    .args(["-l", vm_path])
+                    .output();
+                    
+                match ls_output {
+                    Ok(output) if output.status.success() => {
+                        let output_str = String::from_utf8_lossy(&output.stdout);
+                        // Parse ls output to extract file size
+                        output_str.split_whitespace()
+                            .nth(4)
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0)
+                    },
+                    _ => {
+                        error!("Cannot access file size for: {}", vm_path);
+                        return Err(format!("Cannot access file: {}", vm_path));
+                    }
+                }
+            }
+        };
+        
         let size_gb = size_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
         
-        let last_modified = metadata.modified()
-            .map_err(|e| format!("Failed to get modification time: {}", e))?;
-        let last_modified = DateTime::<Utc>::from(last_modified);
+        // Get last modified time using stat command
+        let stat_time_output = Command::new("stat")
+            .args(["-c", "%Y", vm_path])
+            .output();
+            
+        let last_modified = match stat_time_output {
+            Ok(output) if output.status.success() => {
+                let timestamp_str = String::from_utf8_lossy(&output.stdout);
+                let timestamp = timestamp_str.trim().parse::<i64>().unwrap_or(0);
+                DateTime::<Utc>::from_timestamp(timestamp, 0).unwrap_or_else(|| Utc::now())
+            },
+            _ => Utc::now() // Fallback to current time
+        };
         
         // Check if VM is currently running by looking for qemu processes using this image
         let is_running = Self::is_vm_running_by_image(vm_path);

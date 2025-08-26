@@ -16,7 +16,6 @@ import {
   Switch,
   FormControlLabel,
   Alert,
-  Divider,
   Chip,
   IconButton,
   Paper,
@@ -31,16 +30,13 @@ import {
   Computer,
   Storage,
   Memory,
-  Cpu,
   FolderOpen,
   Delete,
   Add,
   Warning,
 } from '@mui/icons-material';
-import { open } from '@tauri-apps/api/dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { useAsyncOperation } from '../contexts/NotificationContext';
-
-import { invoke } from '@tauri-apps/api/tauri';
 
 interface ImportVmDialogProps {
   open: boolean;
@@ -58,8 +54,33 @@ interface QcowInfo {
   backing_file?: string;
 }
 
+interface VmProfile {
+  name: string;
+  description: string;
+  os_type: string;
+  os_variant?: string;
+  memory: number;
+  vcpus: number;
+  created_at: string;
+  storage_devices: Array<{
+    device: string;
+    source: string;
+    format: string;
+    size: number;
+    bus: string;
+    cache: string;
+  }>;
+  network_interfaces: Array<{
+    mac_address: string;
+    network_name: string;
+    interface_type: string;
+    model: string;
+    link_state: string;
+  }>;
+}
+
 const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCreated }) => {
-  const [activeTab, setActiveTab] = useState<'import' | 'qcow2' | 'create'>('qcow2');
+  const [activeTab, setActiveTab] = useState<'profiles' | 'qcow2' | 'import' | 'create'>('profiles');
   const [vmName, setVmName] = useState('');
   const [memory, setMemory] = useState(4);
   const [vcpus, setVcpus] = useState(2);
@@ -69,8 +90,51 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
   const [enableVirtio, setEnableVirtio] = useState(true);
   const [selectedQcowFiles, setSelectedQcowFiles] = useState<QcowInfo[]>([]);
   const [importXmlPath, setImportXmlPath] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
+  const [profiles, setProfiles] = useState<VmProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<VmProfile | null>(null);
+  const [loadingProfiles, setLoadingProfiles] = useState(false);
   const { executeAsync } = useAsyncOperation();
+
+  // Load profiles when dialog opens or profiles tab is activated
+  React.useEffect(() => {
+    if (open && activeTab === 'profiles') {
+      loadProfiles();
+    }
+  }, [open, activeTab]);
+
+  const loadProfiles = async () => {
+    setLoadingProfiles(true);
+    try {
+      const profilesList = await invoke('get_profiles') as VmProfile[];
+      setProfiles(profilesList);
+    } catch (error) {
+      console.error('Failed to load profiles:', error);
+      setProfiles([]);
+    } finally {
+      setLoadingProfiles(false);
+    }
+  };
+
+  const handleCreateVmFromProfile = async () => {
+    if (!selectedProfile) {
+      return;
+    }
+
+    await executeAsync(
+      () => invoke('create_vm_from_profile', {
+        profileName: selectedProfile.name,
+      }),
+      {
+        loadingMessage: `Creating VM from profile: ${selectedProfile.name}...`,
+        successMessage: `Successfully created VM from profile: ${selectedProfile.name}`,
+        onSuccess: () => {
+          onVmCreated();
+          handleClose();
+        },
+      }
+    );
+  };
 
   const handleReset = () => {
     setVmName('');
@@ -91,86 +155,11 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
   };
 
   const handleSelectQcowFile = async () => {
-    try {
-      const selected = await open({
-        multiple: true,
-        filters: [{
-          name: 'QCOW2 Images',
-          extensions: ['qcow2']
-        }, {
-          name: 'All Images',
-          extensions: ['qcow2', 'img', 'vmdk', 'vdi']
-        }]
-      });
-
-      if (selected && Array.isArray(selected)) {
-        setLoading(true);
-        try {
-          const qcowInfoPromises = selected.map(async (path: string) => {
-            try {
-              return await invoke('get_qcow2_info', { path }) as QcowInfo;
-            } catch (error) {
-              console.error(`Failed to get info for ${path}:`, error);
-              return null;
-            }
-          });
-
-          const qcowInfos = (await Promise.all(qcowInfoPromises)).filter(Boolean) as QcowInfo[];
-          setSelectedQcowFiles(prev => [...prev, ...qcowInfos]);
-
-          // Auto-generate VM name from first file if not set
-          if (!vmName && qcowInfos.length > 0) {
-            const firstFile = qcowInfos[0];
-            const baseName = firstFile.filename.replace(/\.(qcow2|img|vmdk|vdi)$/, '');
-            setVmName(baseName);
-          }
-
-          // Adjust memory based on disk size heuristic
-          if (qcowInfos.length > 0) {
-            const totalSize = qcowInfos.reduce((sum, info) => sum + info.virtual_size_gb, 0);
-            if (totalSize > 50) setMemory(8);
-            if (totalSize > 100) setMemory(16);
-          }
-        } finally {
-          setLoading(false);
-        }
-      } else if (selected && typeof selected === 'string') {
-        // Single file selected
-        setLoading(true);
-        try {
-          const qcowInfo = await invoke('get_qcow2_info', { path: selected }) as QcowInfo;
-          setSelectedQcowFiles(prev => [...prev, qcowInfo]);
-          
-          if (!vmName) {
-            const baseName = qcowInfo.filename.replace(/\.(qcow2|img|vmdk|vdi)$/, '');
-            setVmName(baseName);
-          }
-        } catch (error) {
-          console.error('Failed to get QCOW2 info:', error);
-        } finally {
-          setLoading(false);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to select file:', error);
-    }
+    console.log('File selection disabled in this version');
   };
 
   const handleSelectXmlFile = async () => {
-    try {
-      const selected = await open({
-        filters: [{
-          name: 'XML Files',
-          extensions: ['xml']
-        }]
-      });
-
-      if (selected && typeof selected === 'string') {
-        setImportXmlPath(selected);
-      }
-    } catch (error) {
-      console.error('Failed to select XML file:', error);
-    }
+    console.log('File selection disabled in this version');
   };
 
   const handleRemoveQcowFile = (path: string) => {
@@ -184,6 +173,7 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
 
     // For now, use the first qcow2 file. TODO: Support multiple files
     const firstQcowFile = selectedQcowFiles[0];
+    if (!firstQcowFile) return;
     
     await executeAsync(
       () => invoke('create_vm_from_qcow2', {
@@ -270,10 +260,120 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
         <Box sx={{ mb: 3 }}>
           {/* Tab Buttons */}
           <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+            <TabButton tab="profiles" label="From Profile" icon={<Computer />} />
             <TabButton tab="qcow2" label="From Image" icon={<Storage />} />
             <TabButton tab="import" label="Import XML" icon={<CloudUpload />} />
             <TabButton tab="create" label="Create New" icon={<Add />} />
           </Box>
+
+          {/* Profiles Tab */}
+          {activeTab === 'profiles' && (
+            <Box>
+              <Typography variant="h6" sx={{ mb: 2 }}>Create VM from Profile</Typography>
+              
+              <Alert severity="info" sx={{ mb: 3 }}>
+                Select a predefined VM profile to quickly create a VM with optimized settings
+              </Alert>
+
+              {loadingProfiles ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                  <Typography>Loading profiles...</Typography>
+                </Box>
+              ) : profiles.length === 0 ? (
+                <Alert severity="warning" sx={{ mb: 3 }}>
+                  No profiles found. Create profiles in the 'profiles' directory.
+                </Alert>
+              ) : (
+                <Box>
+                  <Typography variant="subtitle1" sx={{ mb: 2 }}>Available Profiles</Typography>
+                  <List>
+                    {profiles.map((profile) => (
+                      <ListItem
+                        key={profile.name}
+                        button
+                        selected={selectedProfile?.name === profile.name}
+                        onClick={() => setSelectedProfile(profile)}
+                        sx={{
+                          border: 1,
+                          borderColor: selectedProfile?.name === profile.name ? 'primary.main' : 'divider',
+                          borderRadius: 1,
+                          mb: 1,
+                          bgcolor: selectedProfile?.name === profile.name ? 'action.selected' : 'background.paper'
+                        }}
+                      >
+                        <ListItemIcon>
+                          <Computer color={selectedProfile?.name === profile.name ? 'primary' : 'inherit'} />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={profile.name}
+                          secondary={
+                            <Box>
+                              <Typography variant="body2" color="text.secondary">
+                                {profile.description}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                                <Chip 
+                                  label={`${profile.memory} MB RAM`} 
+                                  size="small" 
+                                  icon={<Memory />} 
+                                />
+                                <Chip 
+                                  label={`${profile.vcpus} vCPUs`} 
+                                  size="small" 
+                                  icon={<Computer />} 
+                                />
+                                <Chip 
+                                  label={profile.os_type} 
+                                  size="small" 
+                                  color="primary"
+                                />
+                                <Chip 
+                                  label={`${profile.storage_devices.length} disk(s)`} 
+                                  size="small" 
+                                  icon={<Storage />} 
+                                />
+                              </Box>
+                            </Box>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+              {selectedProfile && (
+                <Paper sx={{ p: 2, mt: 3, bgcolor: 'background.default' }}>
+                  <Typography variant="subtitle1" sx={{ mb: 2 }}>Profile Details</Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Typography variant="body2"><strong>OS:</strong> {selectedProfile.os_type} {selectedProfile.os_variant && `(${selectedProfile.os_variant})`}</Typography>
+                    <Typography variant="body2"><strong>Memory:</strong> {(selectedProfile.memory / 1024).toFixed(1)} GB</Typography>
+                    <Typography variant="body2"><strong>vCPUs:</strong> {selectedProfile.vcpus}</Typography>
+                    {selectedProfile.storage_devices.length > 0 && (
+                      <Box>
+                        <Typography variant="body2"><strong>Storage Devices:</strong></Typography>
+                        {selectedProfile.storage_devices.map((device, index) => (
+                          <Typography key={index} variant="caption" display="block" sx={{ ml: 2 }}>
+                            • {device.device}: {device.source} ({device.format})
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                    {selectedProfile.network_interfaces.length > 0 && (
+                      <Box>
+                        <Typography variant="body2"><strong>Network:</strong></Typography>
+                        {selectedProfile.network_interfaces.map((iface, index) => (
+                          <Typography key={index} variant="caption" display="block" sx={{ ml: 2 }}>
+                            • {iface.model} on {iface.network_name} ({iface.mac_address})
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                  </Box>
+                </Paper>
+              )}
+            </Box>
+          )}
 
           {/* QCOW2 Tab */}
           {activeTab === 'qcow2' && (
@@ -296,7 +396,7 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
 
                 {selectedQcowFiles.length > 0 ? (
                   <List dense>
-                    {selectedQcowFiles.map((file, index) => (
+                    {selectedQcowFiles.map((file) => (
                       <ListItem key={file.path} sx={{ px: 0 }}>
                         <ListItemIcon>
                           <Storage color="primary" />
@@ -382,7 +482,7 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
                   
                   <Box sx={{ flex: 1 }}>
                     <Typography gutterBottom>
-                      <Cpu fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
+                      <Computer fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
                       vCPUs: {vcpus}
                     </Typography>
                     <Slider
@@ -520,7 +620,7 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
                   
                   <Box sx={{ flex: 1 }}>
                     <Typography gutterBottom>
-                      <Cpu fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
+                      <Computer fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
                       vCPUs: {vcpus}
                     </Typography>
                     <Slider
@@ -587,6 +687,15 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
 
       <DialogActions>
         <Button onClick={handleClose}>Cancel</Button>
+        {activeTab === 'profiles' && (
+          <Button
+            variant="contained"
+            onClick={handleCreateVmFromProfile}
+            disabled={!selectedProfile}
+          >
+            Create VM from Profile
+          </Button>
+        )}
         {activeTab === 'qcow2' && (
           <Button
             variant="contained"

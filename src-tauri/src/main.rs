@@ -10,7 +10,7 @@ mod types;
 mod errors;
 mod xml_parser;
 
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -150,6 +150,191 @@ async fn refresh_vms(state: tauri::State<'_, AppState>) -> Result<Vec<VirtualMac
 }
 
 #[tauri::command]
+async fn list_vm_snapshots(
+    state: tauri::State<'_, AppState>,
+    vm_id: String,
+) -> Result<Vec<Snapshot>, String> {
+    let manager = state.read().await;
+    manager.list_snapshots(&vm_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_vm_snapshot(
+    state: tauri::State<'_, AppState>,
+    vm_id: String,
+    snapshot_name: String,
+) -> Result<(), String> {
+    let manager = state.read().await;
+    manager.delete_snapshot(&vm_id, &snapshot_name).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn browse_qcow2_files() -> Result<Vec<String>, String> {
+    use std::process::Command;
+    
+    // Find QCOW2 files in common directories
+    let common_dirs = [
+        "/var/lib/libvirt/images",
+        "/home",
+        "/mnt",
+        "/media"
+    ];
+    
+    let mut qcow2_files = Vec::new();
+    
+    for dir in &common_dirs {
+        if let Ok(output) = Command::new("find")
+            .args([dir, "-name", "*.qcow2", "-type", "f", "-readable", "2>/dev/null"])
+            .output() {
+            
+            if output.status.success() {
+                let files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(|line| line.to_string())
+                    .collect();
+                qcow2_files.extend(files);
+            }
+        }
+    }
+    
+    Ok(qcow2_files)
+}
+
+#[tauri::command]
+async fn browse_xml_files() -> Result<Vec<String>, String> {
+    use std::process::Command;
+    
+    let common_dirs = [
+        "/etc/libvirt/qemu",
+        "/var/lib/libvirt/qemu",
+        "/home"
+    ];
+    
+    let mut xml_files = Vec::new();
+    
+    for dir in &common_dirs {
+        if let Ok(output) = Command::new("find")
+            .args([dir, "-name", "*.xml", "-type", "f", "-readable", "2>/dev/null"])
+            .output() {
+            
+            if output.status.success() {
+                let files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(|line| line.to_string())
+                    .collect();
+                xml_files.extend(files);
+            }
+        }
+    }
+    
+    Ok(xml_files)
+}
+
+#[tauri::command]
+async fn get_profiles() -> Result<Vec<VmProfile>, String> {
+    use std::path::Path;
+    
+    // Try multiple possible locations for profiles directory
+    let possible_paths = [
+        "profiles",
+        "./profiles", 
+        "/mnt/home/lou/github/kvm-manager/profiles",
+        "../profiles",
+    ];
+    
+    let mut profiles_dir: Option<&Path> = None;
+    for path_str in &possible_paths {
+        let path = Path::new(path_str);
+        if path.exists() {
+            profiles_dir = Some(path);
+            info!("Found profiles directory at: {}", path_str);
+            break;
+        }
+    }
+    
+    let profiles_dir = match profiles_dir {
+        Some(dir) => dir,
+        None => {
+            warn!("No profiles directory found in any of the expected locations");
+            return Ok(Vec::new());
+        }
+    };
+    
+    let mut profiles = Vec::new();
+    
+    if let Ok(entries) = std::fs::read_dir(profiles_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(profile) = serde_json::from_str::<VmProfile>(&content) {
+                        profiles.push(profile);
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(profiles)
+}
+
+#[tauri::command]
+async fn create_vm_from_profile(
+    state: tauri::State<'_, AppState>,
+    profile_name: String,
+) -> Result<String, String> {
+    let profiles = get_profiles().await?;
+    let profile = profiles.into_iter()
+        .find(|p| p.name == profile_name)
+        .ok_or_else(|| format!("Profile '{}' not found", profile_name))?;
+    
+    let mut manager = state.write().await;
+    
+    // Check if we have XML file for this profile
+    let xml_filename = format!("{}.xml", profile_name.to_lowercase().replace(" ", "-"));
+    let possible_xml_paths = [
+        format!("profiles/{}", xml_filename),
+        format!("./profiles/{}", xml_filename),
+        format!("/mnt/home/lou/github/kvm-manager/profiles/{}", xml_filename),
+        format!("../profiles/{}", xml_filename),
+    ];
+    
+    let mut xml_path: Option<String> = None;
+    for path_str in &possible_xml_paths {
+        if std::path::Path::new(path_str).exists() {
+            xml_path = Some(path_str.clone());
+            info!("Found XML file at: {}", path_str);
+            break;
+        }
+    }
+    
+    if let Some(xml_path) = xml_path {
+        manager.import_vm_from_xml(&xml_path).await.map_err(|e| e.to_string())
+    } else {
+        // Create VM from QCOW2 if storage devices are specified
+        if let Some(storage_device) = profile.storage_devices.first() {
+            let passthrough_device = if profile.storage_devices.len() > 1 {
+                Some(profile.storage_devices.get(1).unwrap().source.as_str())
+            } else {
+                None
+            };
+            
+            manager.create_vm_from_qcow2(
+                &storage_device.source,
+                &profile.name,
+                profile.memory as u64, // Profile memory is already in MB
+                profile.vcpus,
+                passthrough_device,
+            ).await.map_err(|e| e.to_string())
+        } else {
+            Err("Profile has no storage devices defined".to_string())
+        }
+    }
+}
+
+#[tauri::command]
 async fn get_qcow2_info(path: String) -> Result<QcowInfo, String> {
     use std::process::Command;
     
@@ -251,6 +436,8 @@ async fn main() {
             get_host_info,
             create_snapshot,
             restore_snapshot,
+            list_vm_snapshots,
+            delete_vm_snapshot,
             get_storage_pools,
             get_networks,
             create_proxmox_vm,
@@ -258,13 +445,26 @@ async fn main() {
             create_vm_from_qcow2,
             refresh_vms,
             get_qcow2_info,
+            browse_qcow2_files,
+            browse_xml_files,
+            get_profiles,
+            create_vm_from_profile,
             system_monitor::get_system_statistics,
             system_monitor::get_proxmox_info,
             system_monitor::get_system_history,
             system_monitor::start_system_monitoring
         ])
-        .setup(|app| {
-            info!("Application setup complete");
+        .setup(|_app| {
+    info!("Application setup complete");
+            
+            // Test Proxmox detection
+            tokio::spawn(async {
+                let proxmox_path = "/run/media/garuda/Data/proxmox-ve.qcow2";
+                match system_monitor::SystemMonitor::get_proxmox_vm_info(proxmox_path) {
+                    Ok(info) => info!("Proxmox VM detected: {} GB, running: {}", info.size_gb, info.is_running),
+                    Err(e) => error!("Failed to detect Proxmox VM: {}", e),
+                }
+            });
             
             // Start system monitoring
             tokio::spawn(async {

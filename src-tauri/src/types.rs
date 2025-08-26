@@ -110,13 +110,85 @@ pub struct HostInfo {
     pub inactive_vms: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Snapshot {
     pub name: String,
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub state: String,
     pub parent: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VmProfile {
+    pub name: String,
+    pub description: String,
+    pub os_type: String,
+    pub os_variant: Option<String>,
+    pub memory: u64, // in MB
+    pub vcpus: u32,
+    pub created_at: String,
+    pub network_config: ProfileNetworkConfig,
+    pub storage_config: ProfileStorageConfig,
+    pub display_config: ProfileDisplayConfig,
+    pub boot_config: ProfileBootConfig,
+    pub storage_devices: Vec<ProfileStorageDevice>,
+    pub network_interfaces: Vec<ProfileNetworkInterface>,
+    pub recommended_settings: Option<serde_json::Value>,
+    pub proxmox_specific: Option<serde_json::Value>,
+    pub passthrough_devices: Option<Vec<serde_json::Value>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileNetworkConfig {
+    pub bridge: String,
+    pub network_name: String,
+    pub mac_address: Option<String>,
+    pub model: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileStorageConfig {
+    pub pool_name: String,
+    pub format: String,
+    pub bus: String,
+    pub cache: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileDisplayConfig {
+    pub graphics_type: String,
+    pub listen: String,
+    pub password: Option<String>,
+    pub autoport: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileBootConfig {
+    pub boot_order: Vec<String>,
+    pub iso_path: Option<String>,
+    pub kernel: Option<String>,
+    pub initrd: Option<String>,
+    pub cmdline: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileStorageDevice {
+    pub device: String,
+    pub source: String,
+    pub format: String,
+    pub size: u64,
+    pub bus: String,
+    pub cache: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProfileNetworkInterface {
+    pub mac_address: String,
+    pub network_name: String,
+    pub interface_type: String,
+    pub model: String,
+    pub link_state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

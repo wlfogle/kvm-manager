@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-use tracing::{debug, warn};
-use crate::errors::{KvmError, Result};
+use tracing::debug;
+use crate::errors::Result;
 use crate::types::*;
 
 pub struct XmlParser;
@@ -141,11 +140,24 @@ impl XmlParser {
         let target_bus = Self::extract_attribute_value(disk_xml, "target", "bus")
             .unwrap_or_else(|| "virtio".to_string());
         
+        // Handle both file-based and block device sources
         let source_file = Self::extract_attribute_value(disk_xml, "source", "file");
+        let source_dev = Self::extract_attribute_value(disk_xml, "source", "dev");
+        let source_path = source_file.or(source_dev);
         
-        // Try to get disk size from file if available
-        let size_gb = if let Some(file_path) = &source_file {
-            Self::get_disk_size_from_file(file_path).unwrap_or(0.0)
+        // Determine disk type based on XML type attribute
+        let disk_type = Self::extract_attribute_value(disk_xml, "disk", "type")
+            .unwrap_or_else(|| "file".to_string());
+        
+        // Try to get disk size from file/device if available
+        let size_gb = if let Some(path) = &source_path {
+            if disk_type == "block" {
+                // For block devices, try to get size from /sys/block or blockdev
+                Self::get_block_device_size(path).unwrap_or(0.0)
+            } else {
+                // For file-based images, use qemu-img
+                Self::get_disk_size_from_file(path).unwrap_or(0.0)
+            }
         } else {
             0.0
         };
@@ -154,7 +166,7 @@ impl XmlParser {
             device: target_dev,
             type_: driver_type,
             size_gb,
-            path: source_file,
+            path: source_path,
             bus: target_bus,
             cache: Self::extract_attribute_value(disk_xml, "driver", "cache"),
         })
@@ -175,6 +187,37 @@ impl XmlParser {
         } else {
             None
         }
+    }
+    
+    fn get_block_device_size(device_path: &str) -> Option<f64> {
+        use std::process::Command;
+        
+        // Try blockdev --getsize64 first (most reliable for block devices)
+        let output = Command::new("blockdev")
+            .args(["--getsize64", device_path])
+            .output()
+            .ok()?;
+        
+        if output.status.success() {
+            let size_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(size_bytes) = size_str.trim().parse::<u64>() {
+                return Some(size_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+            }
+        }
+        
+        // Fallback: try to get size from sysfs
+        let device_name = device_path.trim_start_matches("/dev/");
+        let sysfs_path = format!("/sys/block/{}/size", device_name);
+        
+        if let Ok(size_str) = std::fs::read_to_string(&sysfs_path) {
+            if let Ok(size_sectors) = size_str.trim().parse::<u64>() {
+                // Each sector is 512 bytes
+                let size_bytes = size_sectors * 512;
+                return Some(size_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+            }
+        }
+        
+        None
     }
     
     fn parse_network_interfaces(xml: &str) -> Vec<NetworkInterface> {
@@ -254,6 +297,136 @@ impl XmlParser {
             .or_else(|| Self::extract_between_tags(xml, "title"))
     }
     
+    /// Parse network configuration from libvirt XML
+    pub fn parse_network_from_xml(xml: &str) -> Result<NetworkXmlInfo> {
+        debug!("Parsing network XML: {} chars", xml.len());
+        
+        let mut network_info = NetworkXmlInfo::default();
+        
+        // Parse basic info
+        network_info.name = Self::extract_between_tags(xml, "name")
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        network_info.uuid = Self::extract_between_tags(xml, "uuid")
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        
+        // Parse forward mode
+        network_info.forward_mode = Self::extract_attribute_value(xml, "forward", "mode")
+            .unwrap_or_else(|| "nat".to_string());
+        
+        // Parse bridge name
+        network_info.bridge_name = Self::extract_attribute_value(xml, "bridge", "name");
+        
+        // Parse IP configuration
+        if let Some(ip_address) = Self::extract_attribute_value(xml, "ip", "address") {
+            let netmask = Self::extract_attribute_value(xml, "ip", "netmask")
+                .unwrap_or_else(|| "255.255.255.0".to_string());
+            network_info.ip_range = Some(format!("{}/{}", ip_address, Self::netmask_to_cidr(&netmask)));
+        }
+        
+        // Parse DHCP configuration
+        network_info.dhcp_enabled = xml.contains("<dhcp>");
+        if network_info.dhcp_enabled {
+            network_info.dhcp_start = Self::extract_attribute_value(xml, "range", "start");
+            network_info.dhcp_end = Self::extract_attribute_value(xml, "range", "end");
+        }
+        
+        // Parse domain name
+        network_info.domain = Self::extract_attribute_value(xml, "domain", "name");
+        
+        debug!("Parsed network info: name={}, mode={}, dhcp={}", 
+               network_info.name, network_info.forward_mode, network_info.dhcp_enabled);
+        
+        Ok(network_info)
+    }
+    
+    /// Parse storage pool configuration from libvirt XML
+    pub fn parse_storage_pool_from_xml(xml: &str) -> Result<StoragePoolXmlInfo> {
+        debug!("Parsing storage pool XML: {} chars", xml.len());
+        
+        let mut pool_info = StoragePoolXmlInfo::default();
+        
+        // Parse basic info
+        pool_info.name = Self::extract_between_tags(xml, "name")
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        // Parse pool type from root element
+        if let Some(start) = xml.find("<pool type='") {
+            let start_pos = start + 12; // Length of "<pool type='"
+            if let Some(end) = xml[start_pos..].find("'") {
+                pool_info.pool_type = xml[start_pos..start_pos + end].to_string();
+            }
+        }
+        
+        // Parse target path
+        if let Some(path_section) = Self::extract_section(xml, "target") {
+            pool_info.path = Self::extract_between_tags(&path_section, "path");
+        }
+        
+        // Parse source information for different pool types
+        if let Some(source_section) = Self::extract_section(xml, "source") {
+            match pool_info.pool_type.as_str() {
+                "logical" => {
+                    pool_info.source_name = Self::extract_between_tags(&source_section, "name");
+                }
+                "iscsi" => {
+                    pool_info.source_host = Self::extract_attribute_value(&source_section, "host", "name");
+                    pool_info.source_device = Self::extract_attribute_value(&source_section, "device", "path");
+                }
+                _ => {}
+            }
+        }
+        
+        debug!("Parsed storage pool info: name={}, type={}, path={:?}", 
+               pool_info.name, pool_info.pool_type, pool_info.path);
+        
+        Ok(pool_info)
+    }
+    
+    fn extract_section(xml: &str, section_name: &str) -> Option<String> {
+        let start_tag = format!("<{}>", section_name);
+        let end_tag = format!("</{}>", section_name);
+        
+        if let Some(start_pos) = xml.find(&start_tag) {
+            if let Some(end_pos) = xml[start_pos..].find(&end_tag) {
+                let section_end = start_pos + end_pos + end_tag.len();
+                return Some(xml[start_pos..section_end].to_string());
+            }
+        }
+        None
+    }
+    
+    fn netmask_to_cidr(netmask: &str) -> u8 {
+        match netmask {
+            "255.255.255.255" => 32,
+            "255.255.255.254" => 31,
+            "255.255.255.252" => 30,
+            "255.255.255.248" => 29,
+            "255.255.255.240" => 28,
+            "255.255.255.224" => 27,
+            "255.255.255.192" => 26,
+            "255.255.255.128" => 25,
+            "255.255.255.0" => 24,
+            "255.255.254.0" => 23,
+            "255.255.252.0" => 22,
+            "255.255.248.0" => 21,
+            "255.255.240.0" => 20,
+            "255.255.224.0" => 19,
+            "255.255.192.0" => 18,
+            "255.255.128.0" => 17,
+            "255.255.0.0" => 16,
+            "255.254.0.0" => 15,
+            "255.252.0.0" => 14,
+            "255.248.0.0" => 13,
+            "255.240.0.0" => 12,
+            "255.224.0.0" => 11,
+            "255.192.0.0" => 10,
+            "255.128.0.0" => 9,
+            "255.0.0.0" => 8,
+            _ => 24, // Default to /24
+        }
+    }
+    
     fn extract_attribute_value(xml: &str, element: &str, attribute: &str) -> Option<String> {
         let pattern = format!(r#"<{}\s+[^>]*{}=['""]([^'"]*)['""]"#, element, attribute);
         if let Ok(regex) = regex::Regex::new(&pattern) {
@@ -288,4 +461,27 @@ pub struct VmXmlInfo {
     pub vnc_port: Option<u16>,
     pub spice_port: Option<u16>,
     pub description: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct NetworkXmlInfo {
+    pub name: String,
+    pub uuid: String,
+    pub forward_mode: String,
+    pub bridge_name: Option<String>,
+    pub ip_range: Option<String>,
+    pub dhcp_enabled: bool,
+    pub dhcp_start: Option<String>,
+    pub dhcp_end: Option<String>,
+    pub domain: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct StoragePoolXmlInfo {
+    pub name: String,
+    pub pool_type: String,
+    pub path: Option<String>,
+    pub source_name: Option<String>,
+    pub source_host: Option<String>,
+    pub source_device: Option<String>,
 }

@@ -32,7 +32,7 @@ import {
   Visibility,
   CloudUpload,
 } from '@mui/icons-material';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { useCustomTheme } from '../contexts/ThemeContext';
 import { useAsyncOperation } from '../contexts/NotificationContext';
 import { format } from 'date-fns';
@@ -307,11 +307,16 @@ const VirtualMachinesDashboard: React.FC = () => {
           </Box>
 
           <Box sx={{ display: 'flex', gap: 1 }}>
-            {!proxmoxInfo.is_running && (
+            {!proxmoxInfo.is_running && vms.find(vm => vm.name === 'proxmox-ve') && (
               <Button
                 variant="contained"
                 startIcon={<PlayArrow />}
-                onClick={() => handleCreateProxmoxVM('proxmox-ve', 8, 4)}
+                onClick={() => {
+                  const proxmoxVm = vms.find(vm => vm.name === 'proxmox-ve');
+                  if (proxmoxVm) {
+                    handleVmAction(proxmoxVm.id, 'start', proxmoxVm.name);
+                  }
+                }}
                 sx={{ flex: 1 }}
               >
                 Start Proxmox
@@ -514,13 +519,6 @@ const VirtualMachinesDashboard: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
-      
-      {/* Import VM Dialog */}
-      <ImportVmDialog
-        open={importDialogOpen}
-        onClose={() => setImportDialogOpen(false)}
-        onVmCreated={loadVms}
-      />
     );
   };
 
@@ -608,6 +606,11 @@ const VirtualMachinesDashboard: React.FC = () => {
 
       {/* Dialogs */}
       <CreateVMDialog />
+      <ImportVmDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onVmCreated={loadVms}
+      />
       <VMDetailsModal 
         vm={selectedVm} 
         open={detailsOpen} 

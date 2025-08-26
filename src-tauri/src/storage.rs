@@ -131,10 +131,16 @@ impl StorageManager {
         let path = volume.get_path()
             .map_err(|e| KvmError::StorageOperationFailed(format!("Failed to get volume path: {}", e)))?;
         
+        // Get volume XML to parse format
+        let volume_xml = volume.get_xml_desc(0)
+            .map_err(|e| KvmError::StorageOperationFailed(format!("Failed to get volume XML: {}", e)))?;
+        
+        let format = self.parse_volume_format(&volume_xml);
+        
         Ok(VolumeInfo {
             name: volume_name.to_string(),
             path,
-            format: "unknown".to_string(), // TODO: Parse from XML
+            format,
             capacity: info.capacity,
             allocation: info.allocation,
         })
@@ -192,6 +198,132 @@ impl StorageManager {
             config.format,
             source_path
         );
+        
+        Ok(xml)
+    }
+    
+    fn parse_volume_format(&self, volume_xml: &str) -> String {
+        // Parse format from volume XML
+        if let Some(start) = volume_xml.find("<format type='") {
+            let start_pos = start + 14; // Length of "<format type='"
+            if let Some(end) = volume_xml[start_pos..].find("'") {
+                return volume_xml[start_pos..start_pos + end].to_string();
+            }
+        }
+        
+        // Alternative pattern
+        if let Some(start) = volume_xml.find("<format type=\"") {
+            let start_pos = start + 14; // Length of "<format type=\""
+            if let Some(end) = volume_xml[start_pos..].find("\"") {
+                return volume_xml[start_pos..start_pos + end].to_string();
+            }
+        }
+        
+        "raw".to_string() // Default format
+    }
+    
+    pub async fn list_pool_volumes(&self, pool_name: &str) -> Result<Vec<VolumeInfo>> {
+        let pool = LibvirtPool::lookup_by_name(&self.connection, pool_name)
+            .map_err(|e| KvmError::StorageOperationFailed(format!("Storage pool not found: {}", e)))?;
+        
+        let volumes = pool.list_all_volumes(0)
+            .map_err(|e| KvmError::StorageOperationFailed(format!("Failed to list volumes: {}", e)))?;
+        
+        let mut volume_infos = Vec::new();
+        
+        for volume in volumes {
+            let name = volume.get_name().map_err(KvmError::LibvirtConnection)?;
+            let info = volume.get_info().map_err(KvmError::LibvirtConnection)?;
+            let path = volume.get_path().map_err(KvmError::LibvirtConnection)?;
+            
+            // Get volume XML to parse format
+            let volume_xml = volume.get_xml_desc(0)
+                .map_err(|e| KvmError::StorageOperationFailed(format!("Failed to get volume XML: {}", e)))?;
+            
+            let format = self.parse_volume_format(&volume_xml);
+            
+            volume_infos.push(VolumeInfo {
+                name,
+                path,
+                format,
+                capacity: info.capacity,
+                allocation: info.allocation,
+            });
+        }
+        
+        Ok(volume_infos)
+    }
+    
+    pub async fn create_storage_pool(&self, pool_name: &str, pool_type: &str, pool_path: &str, auto_start: bool) -> Result<String> {
+        info!("Creating storage pool: {}", pool_name);
+        
+        let pool_xml = self.generate_pool_xml(pool_name, pool_type, pool_path)?;
+        
+        // Define the pool
+        let pool = LibvirtPool::define_xml(&self.connection, &pool_xml, 0)
+            .map_err(|e| {
+                error!("Failed to define storage pool {}: {}", pool_name, e);
+                KvmError::StorageOperationFailed(format!("Failed to create storage pool: {}", e))
+            })?;
+        
+        // Build the pool if it's a directory pool
+        if pool_type == "dir" {
+            pool.build(0)
+                .map_err(|e| {
+                    error!("Failed to build storage pool {}: {}", pool_name, e);
+                    KvmError::StorageOperationFailed(format!("Failed to build storage pool: {}", e))
+                })?;
+        }
+        
+        // Start the pool if requested
+        if auto_start {
+            pool.create(0)
+                .map_err(|e| {
+                    error!("Failed to start storage pool {}: {}", pool_name, e);
+                    KvmError::StorageOperationFailed(format!("Failed to start storage pool: {}", e))
+                })?;
+            
+            pool.set_autostart(true)
+                .map_err(|e| {
+                    error!("Failed to set autostart for storage pool {}: {}", pool_name, e);
+                    KvmError::StorageOperationFailed(format!("Failed to set autostart: {}", e))
+                })?;
+        }
+        
+        info!("Successfully created storage pool: {}", pool_name);
+        Ok(pool_name.to_string())
+    }
+    
+    fn generate_pool_xml(&self, name: &str, pool_type: &str, path: &str) -> Result<String> {
+        let xml = match pool_type {
+            "dir" => format!(
+                r#"<pool type='dir'>
+  <name>{}</name>
+  <target>
+    <path>{}</path>
+  </target>
+</pool>"#,
+                name,
+                path
+            ),
+            "logical" => format!(
+                r#"<pool type='logical'>
+  <name>{}</name>
+  <source>
+    <name>{}</name>
+  </source>
+  <target>
+    <path>/dev/{}</path>
+  </target>
+</pool>"#,
+                name,
+                name, // Use name as volume group name
+                name
+            ),
+            _ => {
+                return Err(KvmError::StorageOperationFailed(format!("Unsupported pool type: {}", pool_type)));
+            }
+        };
         
         Ok(xml)
     }
