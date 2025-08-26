@@ -146,15 +146,57 @@ impl SystemMonitor {
     }
 
     fn get_network_stats(&self) -> NetworkInfo {
-        // Note: Modern sysinfo no longer directly exposes network stats via networks() method
-        // This is a placeholder implementation
-        let interfaces = vec![];
+        use std::fs;
+        use std::collections::HashMap;
+        
+        let mut interfaces = Vec::new();
+        let mut total_rx_bytes = 0u64;
+        let mut total_tx_bytes = 0u64;
+        let mut total_rx_packets = 0u64;
+        let mut total_tx_packets = 0u64;
+        
+        // Read network statistics from /proc/net/dev
+        if let Ok(content) = fs::read_to_string("/proc/net/dev") {
+            for line in content.lines().skip(2) { // Skip header lines
+                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                if parts.len() >= 17 {
+                    let name = parts[0].trim_end_matches(':').to_string();
+                    
+                    // Skip loopback interface
+                    if name == "lo" {
+                        continue;
+                    }
+                    
+                    if let (Ok(rx_bytes), Ok(tx_bytes), Ok(rx_packets), Ok(tx_packets)) = (
+                        parts[1].parse::<u64>(),
+                        parts[9].parse::<u64>(),
+                        parts[2].parse::<u64>(),
+                        parts[10].parse::<u64>()
+                    ) {
+                        interfaces.push(NetworkInterface {
+                            name: name.clone(),
+                            bytes_received: rx_bytes,
+                            bytes_transmitted: tx_bytes,
+                            packets_received: rx_packets,
+                            packets_transmitted: tx_packets,
+                            errors_received: parts[3].parse().unwrap_or(0),
+                            errors_transmitted: parts[11].parse().unwrap_or(0),
+                        });
+                        
+                        total_rx_bytes += rx_bytes;
+                        total_tx_bytes += tx_bytes;
+                        total_rx_packets += rx_packets;
+                        total_tx_packets += tx_packets;
+                    }
+                }
+            }
+        }
         
         NetworkInfo {
-            total_bytes_received: 0,
-            total_bytes_transmitted: 0,
-            total_packets_received: 0,
-            total_packets_transmitted: 0,
+            total_bytes_received: total_rx_bytes,
+            total_bytes_transmitted: total_tx_bytes,
+            total_packets_received: total_rx_packets,
+            total_packets_transmitted: total_tx_packets,
             interfaces,
         }
     }

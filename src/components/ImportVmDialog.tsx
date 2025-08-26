@@ -155,11 +155,44 @@ const ImportVmDialog: React.FC<ImportVmDialogProps> = ({ open, onClose, onVmCrea
   };
 
   const handleSelectQcowFile = async () => {
-    console.log('File selection disabled in this version');
+    try {
+      const qcowFiles = await invoke('browse_qcow2_files') as string[];
+      if (qcowFiles.length > 0) {
+        // Get info for each file and add to selection
+        const fileInfoPromises = qcowFiles.slice(0, 10).map(async (filePath) => {
+          try {
+            const info = await invoke('get_qcow2_info', { path: filePath });
+            return info;
+          } catch (error) {
+            console.error(`Failed to get info for ${filePath}:`, error);
+            return null;
+          }
+        });
+        
+        const fileInfos = (await Promise.all(fileInfoPromises)).filter(Boolean);
+        setSelectedQcowFiles(prev => [...prev, ...fileInfos as QcowInfo[]]);
+      } else {
+        console.log('No QCOW2 files found in common directories');
+      }
+    } catch (error) {
+      console.error('Failed to browse QCOW2 files:', error);
+    }
   };
 
   const handleSelectXmlFile = async () => {
-    console.log('File selection disabled in this version');
+    try {
+      const xmlFiles = await invoke('browse_xml_files') as string[];
+      if (xmlFiles.length > 0) {
+        // For now, just set the first XML file found
+        // This could be expanded to show a selection dialog
+        setImportXmlPath(xmlFiles[0]);
+        console.log('Selected XML file:', xmlFiles[0]);
+      } else {
+        console.log('No XML files found in common directories');
+      }
+    } catch (error) {
+      console.error('Failed to browse XML files:', error);
+    }
   };
 
   const handleRemoveQcowFile = (path: string) => {

@@ -325,7 +325,14 @@ const VirtualMachinesDashboard: React.FC = () => {
             <Button
               variant="outlined"
               startIcon={<Settings />}
-              onClick={() => {/* TODO: Open settings */}}
+              onClick={() => {
+                // Open VM configuration - could integrate with VM details or settings modal
+                if (proxmoxInfo) {
+                  // For now, just show a success message - this could be expanded
+                  // to open a VM configuration dialog
+                  console.log('Opening Proxmox configuration for:', proxmoxInfo.path);
+                }
+              }}
               sx={{ flex: 1 }}
             >
               Configure
